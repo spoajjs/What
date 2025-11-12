@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Cards</title>
+<style>
+  body {
+    font-family: 'Arial', sans-serif;
+    background-color: #f7f7f7;
+    direction: rtl;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+  }
+  h2 {
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .card-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    width: 90%;
+    max-width: 500px;
+  }
+  .card-button {
+    padding: 15px;
+    font-size: 18px;
+    background-color: #1E90FF;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .card-button:hover {
+    background-color: #0066cc;
+  }
+</style>
+</head>
+<body>
+<h2>اختر بطاقة للعب</h2>
+<div class="card-container" id="cardContainer">
+  <!-- Buttons will be generated here -->
+</div>
+
+<script>
+function getQueryParam(param) {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(param);
+}
+
+function createCardButtons(cards) {
+    const container = document.getElementById('cardContainer');
+    container.innerHTML = ''; // clear previous buttons
+    cards.forEach(card => {
+        const button = document.createElement('button');
+        button.className = 'card-button';
+        button.textContent = card;
+        button.onclick = () => {
+            // Send Telegram Web App event
+            if (window.Telegram.WebApp) {
+                window.Telegram.WebApp.sendData(`/card ${card}`);
+            } else {
+                alert(`تم اختيار البطاقة: ${card}`);
+            }
+        };
+        container.appendChild(button);
+    });
+}
+
+// Read cards from query param
+const cardsParam = getQueryParam('cards');
+if (cardsParam) {
+    const cards = cardsParam.split('|').slice(0, 5); // Max 5 cards
+    createCardButtons(cards);
+} else {
+    document.getElementById('cardContainer').innerHTML = '<p>لم يتم إرسال أي بطاقات.</p>';
+}
+</script>
+</body>
+</html>
