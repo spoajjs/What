@@ -1,86 +1,150 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mini Cards</title>
+<meta charset="utf-8">
+<title>CAH Game</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  body {
-    font-family: 'Arial', sans-serif;
-    background-color: #f7f7f7;
-    direction: rtl;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    margin: 0;
-  }
-  h2 {
-    margin-bottom: 20px;
-    text-align: center;
-  }
-  .card-container {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    width: 90%;
-    max-width: 500px;
-  }
-  .card-button {
-    padding: 15px;
-    font-size: 18px;
-    background-color: #1E90FF;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: 0.2s;
-  }
-  .card-button:hover {
-    background-color: #0066cc;
-  }
+body { font-family: Arial; margin: 20px; }
+button { margin: 5px; padding: 10px; }
+#hand button { display:block; margin-bottom:5px; }
+#played { margin-top:20px; }
+#voting { margin-top:20px; }
 </style>
 </head>
 <body>
-<h2>اختر بطاقة للعب</h2>
-<div class="card-container" id="cardContainer">
-  <!-- Buttons will be generated here -->
-</div>
+<h2 id="prompt">Waiting for game to start...</h2>
+
+<h3>Your Hand:</h3>
+<div id="hand"></div>
+
+<h3>Played Cards:</h3>
+<div id="played"></div>
+
+<h3>Voting:</h3>
+<div id="voting"></div>
+
+<button id="refresh">Refresh Hand</button>
 
 <script>
-function getQueryParam(param) {
-    const params = new URLSearchParams(window.location.search);
-    return params.get(param);
+const tg = window.Telegram.WebApp;
+const user = tg.initDataUnsafe.user;
+const game_id = "default_game";
+
+let hand = [];
+let playedCards = [];
+let voted = false;
+let currentBlackCard = "Black card will appear here";
+
+// ---- Helper Functions ----
+async function register() {
+    const res = await fetch("http://localhost:5000/register_player", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({game_id, user_id:user.id, nickname:user.first_name})
+    });
+    const data = await res.json();
+    hand = data.hand;
+    displayHand();
+    await getNextBlackCard();
 }
 
-function createCardButtons(cards) {
-    const container = document.getElementById('cardContainer');
-    container.innerHTML = ''; // clear previous buttons
-    cards.forEach(card => {
-        const button = document.createElement('button');
-        button.className = 'card-button';
-        button.textContent = card;
-        button.onclick = () => {
-            // Send Telegram Web App event
-            if (window.Telegram.WebApp) {
-                window.Telegram.WebApp.sendData(`/card ${card}`);
-            } else {
-                alert(`تم اختيار البطاقة: ${card}`);
-            }
-        };
-        container.appendChild(button);
+function displayHand(){
+    const div = document.getElementById("hand");
+    div.innerHTML = "";
+    hand.forEach(card=>{
+        const btn = document.createElement("button");
+        btn.innerText = card;
+        btn.disabled = playedCards.find(p=>p.user_id===user.id);
+        btn.onclick = ()=>playCard(card);
+        div.appendChild(btn);
     });
 }
 
-// Read cards from query param
-const cardsParam = getQueryParam('cards');
-if (cardsParam) {
-    const cards = cardsParam.split('|').slice(0, 5); // Max 5 cards
-    createCardButtons(cards);
-} else {
-    document.getElementById('cardContainer').innerHTML = '<p>لم يتم إرسال أي بطاقات.</p>';
+function displayBlackCard(){
+    document.getElementById("prompt").innerText = currentBlackCard;
 }
+
+function displayPlayed(){
+    const div = document.getElementById("played");
+    div.innerHTML = "";
+    playedCards.forEach(p=>{
+        const el = document.createElement("div");
+        el.innerText = `${p.nickname}: ${p.card}`;
+        div.appendChild(el);
+    });
+}
+
+function displayVoting(cards){
+    const div = document.getElementById("voting");
+    div.innerHTML = "";
+    cards.forEach(v=>{
+        const btn = document.createElement("button");
+        btn.innerText = v.card;
+        btn.onclick = ()=>castVote(v.card);
+        btn.disabled = voted;
+        div.appendChild(btn);
+    });
+}
+
+// ---- Actions ----
+async function playCard(card){
+    if(playedCards.find(p=>p.user_id===user.id)) return;
+    const res = await fetch("http://localhost:5000/play_card", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({game_id, user_id:user.id, card})
+    });
+    const data = await res.json();
+    if(data.error){ alert(data.error); return; }
+
+    playedCards.push({user_id:user.id, nickname:user.first_name, card});
+    displayHand();
+    displayPlayed();
+
+    const allRes = await fetch(`http://localhost:5000/played_cards?game_id=${game_id}`);
+    const allData = await allRes.json();
+    if(allData.complete) startVoting(allData.cards);
+}
+
+function startVoting(cards){
+    displayVoting(cards);
+}
+
+async function castVote(card){
+    voted = true;
+    const res = await fetch("http://localhost:5000/vote", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({game_id, user_id:user.id, card})
+    });
+    const data = await res.json();
+    if(data.ok) checkRoundResult();
+}
+
+async function checkRoundResult(){
+    const res = await fetch(`http://localhost:5000/round_result?game_id=${game_id}`);
+    const data = await res.json();
+    if(data.winner){
+        alert(`Round winner: ${data.winner} with card: ${data.card}`);
+        playedCards = [];
+        voted = false;
+        displayHand();
+        displayPlayed();
+        displayVoting([]);
+        await getNextBlackCard();
+    }
+}
+
+async function getNextBlackCard(){
+    const res = await fetch(`http://localhost:5000/next_black?game_id=${game_id}`);
+    const data = await res.json();
+    currentBlackCard = data.black_card || "No more black cards! Game over.";
+    displayBlackCard();
+}
+
+document.getElementById("refresh").onclick = register;
+register();
 </script>
 </body>
 </html>
