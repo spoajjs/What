@@ -1,150 +1,77 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>CAH Game</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-body { font-family: Arial; margin: 20px; }
-button { margin: 5px; padding: 10px; }
-#hand button { display:block; margin-bottom:5px; }
-#played { margin-top:20px; }
-#voting { margin-top:20px; }
-</style>
+<title>Cards Game</title>
 </head>
 <body>
-<h2 id="prompt">Waiting for game to start...</h2>
-
-<h3>Your Hand:</h3>
+<h2>Cards Game</h2>
+<div id="question"></div>
 <div id="hand"></div>
-
-<h3>Played Cards:</h3>
 <div id="played"></div>
-
-<h3>Voting:</h3>
-<div id="voting"></div>
-
-<button id="refresh">Refresh Hand</button>
-
+<div id="votes"></div>
 <script>
-const tg = window.Telegram.WebApp;
-const user = tg.initDataUnsafe.user;
-const game_id = "default_game";
+let user_id = prompt("Enter your Telegram user_id");
+let nickname = prompt("Enter your nickname");
 
-let hand = [];
-let playedCards = [];
-let voted = false;
-let currentBlackCard = "Black card will appear here";
+function fetchGame() {
+    fetch(`/game_state/${user_id}`)
+    .then(res => res.json())
+    .then(update)
+}
 
-// ---- Helper Functions ----
-async function register() {
-    const res = await fetch("http://localhost:5000/register_player", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({game_id, user_id:user.id, nickname:user.first_name})
+function update(data){
+    if(!data.started){
+        document.getElementById("question").innerText = "Waiting for the game to start...";
+        document.getElementById("hand").innerHTML = "";
+        document.getElementById("played").innerHTML = "";
+        document.getElementById("votes").innerHTML = "";
+        return;
+    }
+
+    if(!data.joined){
+        document.getElementById("question").innerText = "You did not join the game via Telegram.";
+        document.getElementById("hand").innerHTML = "";
+        return;
+    }
+
+    document.getElementById("question").innerText = "Black Card: " + data.current_black;
+
+    let handDiv = document.getElementById("hand");
+    handDiv.innerHTML = "";
+    data.hand.forEach(c=>{
+        let btn=document.createElement("button");
+        btn.innerText=c;
+        btn.onclick=()=>{
+            fetch(`/play_card_web`, {
+                method:"POST",
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({user_id:user_id, card:c, nickname:nickname})
+            }).then(fetchGame)
+        };
+        handDiv.appendChild(btn);
     });
-    const data = await res.json();
-    hand = data.hand;
-    displayHand();
-    await getNextBlackCard();
-}
 
-function displayHand(){
-    const div = document.getElementById("hand");
-    div.innerHTML = "";
-    hand.forEach(card=>{
-        const btn = document.createElement("button");
-        btn.innerText = card;
-        btn.disabled = playedCards.find(p=>p.user_id===user.id);
-        btn.onclick = ()=>playCard(card);
-        div.appendChild(btn);
-    });
-}
+    document.getElementById("played").innerText = "Played Cards: " + JSON.stringify(data.played_cards);
 
-function displayBlackCard(){
-    document.getElementById("prompt").innerText = currentBlackCard;
-}
-
-function displayPlayed(){
-    const div = document.getElementById("played");
-    div.innerHTML = "";
-    playedCards.forEach(p=>{
-        const el = document.createElement("div");
-        el.innerText = `${p.nickname}: ${p.card}`;
-        div.appendChild(el);
-    });
-}
-
-function displayVoting(cards){
-    const div = document.getElementById("voting");
-    div.innerHTML = "";
-    cards.forEach(v=>{
-        const btn = document.createElement("button");
-        btn.innerText = v.card;
-        btn.onclick = ()=>castVote(v.card);
-        btn.disabled = voted;
-        div.appendChild(btn);
-    });
-}
-
-// ---- Actions ----
-async function playCard(card){
-    if(playedCards.find(p=>p.user_id===user.id)) return;
-    const res = await fetch("http://localhost:5000/play_card", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({game_id, user_id:user.id, card})
-    });
-    const data = await res.json();
-    if(data.error){ alert(data.error); return; }
-
-    playedCards.push({user_id:user.id, nickname:user.first_name, card});
-    displayHand();
-    displayPlayed();
-
-    const allRes = await fetch(`http://localhost:5000/played_cards?game_id=${game_id}`);
-    const allData = await allRes.json();
-    if(allData.complete) startVoting(allData.cards);
-}
-
-function startVoting(cards){
-    displayVoting(cards);
-}
-
-async function castVote(card){
-    voted = true;
-    const res = await fetch("http://localhost:5000/vote", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({game_id, user_id:user.id, card})
-    });
-    const data = await res.json();
-    if(data.ok) checkRoundResult();
-}
-
-async function checkRoundResult(){
-    const res = await fetch(`http://localhost:5000/round_result?game_id=${game_id}`);
-    const data = await res.json();
-    if(data.winner){
-        alert(`Round winner: ${data.winner} with card: ${data.card}`);
-        playedCards = [];
-        voted = false;
-        displayHand();
-        displayPlayed();
-        displayVoting([]);
-        await getNextBlackCard();
+    let votesDiv = document.getElementById("votes");
+    votesDiv.innerHTML = "";
+    if(data.voting_phase){
+        data.played_cards.forEach((p,i)=>{
+            let btn=document.createElement("button");
+            btn.innerText=p.card+" ("+p.nickname+")";
+            btn.onclick=()=> {
+                fetch(`/vote_web`, {
+                    method:"POST",
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({user_id:user_id, vote_index:i})
+                }).then(fetchGame)
+            }
+            votesDiv.appendChild(btn)
+        })
     }
 }
 
-async function getNextBlackCard(){
-    const res = await fetch(`http://localhost:5000/next_black?game_id=${game_id}`);
-    const data = await res.json();
-    currentBlackCard = data.black_card || "No more black cards! Game over.";
-    displayBlackCard();
-}
-
-document.getElementById("refresh").onclick = register;
-register();
+setInterval(fetchGame,1000)
 </script>
 </body>
 </html>
